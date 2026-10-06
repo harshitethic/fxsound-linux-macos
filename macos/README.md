@@ -26,7 +26,7 @@ disabled by default because the macOS 26.6 HAL can block during tap startup.
 From the repository root:
 
 ```bash
-git clone https://github.com/harshitethic/fxsound-app.git
+git clone https://github.com/harshitethic/fxsound-linux-macos.git
 cd fxsound-app
 ./install.sh
 ```
