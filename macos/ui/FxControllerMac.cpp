@@ -96,6 +96,7 @@ bool FxController::parseStatus(const juce::String& json)
         return false;
 
     current_preset_ = object->getProperty("preset").toString();
+    preset_modified_ = static_cast<bool>(object->getProperty("modified"));
     power_on_ = static_cast<bool>(object->getProperty("power"));
     current_output_node_ = object->getProperty("output").toString();
 
@@ -212,6 +213,15 @@ bool FxController::setPresetName(const juce::String& name)
     return true;
 }
 
+bool FxController::resetCurrentPreset()
+{
+    if (!responseOk(sendCommand("RESET")))
+        return false;
+
+    refresh();
+    return true;
+}
+
 void FxController::setPowerState(bool on)
 {
     if (responseOk(sendCommand(juce::String("POWER ") + (on ? "1" : "0"))))
@@ -288,6 +298,12 @@ void FxController::setEffectValue(FxEffects::EffectType effect, float value)
 
 void FxController::setNumEqBands(int num_bands)
 {
+    // Re-applying the same band count makes DfxDsp regenerate the centre
+    // frequency grid. Avoid that so exact factory-preset frequencies survive
+    // UI refreshes and Restore Defaults.
+    if (num_bands == num_eq_bands_)
+        return;
+
     if (responseOk(sendCommand("BANDS " + juce::String(num_bands))))
     {
         num_eq_bands_ = num_bands;
@@ -319,6 +335,9 @@ void FxController::setMasterGain(float value)
 void FxController::setFilterQ(float value)
 {
     value = std::round(value * 2.0f) / 2.0f;
+    if (std::fabs(value - filter_q_) < 0.001f)
+        return;
+
     if (responseOk(sendCommand("AUDIO filterq " + juce::String(value, 4))))
         filter_q_ = value;
 }

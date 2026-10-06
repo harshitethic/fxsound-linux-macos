@@ -3,6 +3,7 @@
  * Uses the upstream FxSound DfxDsp engine (AGPL-3.0-or-later).
  */
 #include "DfxDsp.h"
+#include "FxNativeTapBridge.h"
 #include <CoreAudio/CoreAudio.h>
 #include <CoreFoundation/CoreFoundation.h>
 
@@ -117,6 +118,9 @@ struct App {
     AudioDeviceID original_system_output{kAudioObjectUnknown};
     AudioDeviceIOProcID capture_proc{};
     AudioDeviceIOProcID output_proc{};
+    void* native_tap_handle{nullptr};
+    bool using_native_tap{false};
+    bool changed_system_defaults{false};
     std::atomic<bool> running{true};
     DfxDsp dsp;
     std::mutex dsp_mutex;
@@ -674,7 +678,9 @@ std::string status_json(App& app) {
         << ",\"filter_q\":" << app.dsp.getFilterQ()
         << "}"
         << ",\"bands\":" << app.dsp.getNumEqBands()
-        << ",\"engine\":{\"rate\":" << kRate
+        << ",\"engine\":{\"backend\":\""
+        << (app.using_native_tap ? "CoreAudioTap" : "BlackHole")
+        << "\",\"rate\":" << kRate
         << ",\"channels\":" << kChannels
         << ",\"latency_frames\":" << kWindowsPrimeFrames
         << ",\"latency_ms\":" << kWindowsAverageDelayMs
@@ -875,7 +881,8 @@ std::string handle_control_command(App& app, const std::string& input) {
             return "{\"ok\":false,\"error\":\"bands must be 5, 10, 15, 20, or 31\"}";
 
         std::lock_guard<std::mutex> lock(app.dsp_mutex);
-        app.dsp.setNumBands(bands);
+        if (app.dsp.getNumEqBands() != bands)
+            app.dsp.setNumBands(bands);
         save_audio_settings_unlocked(app);
         return "{\"ok\":true}";
     }
@@ -908,7 +915,23 @@ std::string handle_control_command(App& app, const std::string& input) {
             if (value < 1.0f || value > 3.0f)
                 return "{\"ok\":false,\"error\":\"filterq range is 1..3\"}";
             value = std::round(value * 2.0f) / 2.0f;
-            app.dsp.setFilterQ(value);
+
+            // GraphicEqSetFilterQ rebuilds the internal EQ grid. Preserve the
+            // current centre frequencies so changing Q changes bandwidth only,
+            // not the user's/factory preset frequency layout.
+            if (std::fabs(app.dsp.getFilterQ() - value) >= 0.001f) {
+                const int band_count = app.dsp.getNumEqBands();
+                std::vector<float> frequencies;
+                frequencies.reserve(static_cast<size_t>(band_count));
+                for (int band = 0; band < band_count; ++band)
+                    frequencies.push_back(app.dsp.getEqBandFrequency(band));
+
+                app.dsp.setFilterQ(value);
+
+                for (int band = 0; band < band_count; ++band)
+                    app.dsp.setEqBandFrequency(
+                        band, frequencies[static_cast<size_t>(band)]);
+            }
         } else {
             return "{\"ok\":false,\"error\":\"unknown audio control\"}";
         }
@@ -1253,13 +1276,6 @@ int main(int argc, char** argv) {
 
     configure_dsp(app);
 
-    app.capture_device = find_blackhole();
-    if (app.capture_device == kAudioObjectUnknown) {
-        std::fprintf(stderr,
-            "FxSound macOS: BlackHole 2ch is not installed or not visible yet.\n");
-        return 4;
-    }
-
     app.original_default_output = default_output_device();
     app.original_system_output = system_output_device();
 
@@ -1269,8 +1285,8 @@ int main(int argc, char** argv) {
         device_channels(target_id, kAudioDevicePropertyScopeOutput) < 2 ||
         device_name(target_id).find("BlackHole") != std::string::npos) {
         target_id = app.original_default_output;
-        if (target_id == app.capture_device ||
-            target_id == kAudioObjectUnknown ||
+        if (target_id == kAudioObjectUnknown ||
+            device_channels(target_id, kAudioDevicePropertyScopeOutput) < 2 ||
             device_name(target_id).find("BlackHole") != std::string::npos) {
             std::lock_guard<std::mutex> lock(app.outputs_mutex);
             target_id = app.outputs.empty() ? kAudioObjectUnknown : app.outputs.front().id;
@@ -1283,53 +1299,122 @@ int main(int argc, char** argv) {
         return 5;
     }
 
-    // If FxSound is restarting after an abnormal exit, macOS may still have
-    // BlackHole set as the default/system output. Never remember BlackHole as
-    // the restore target; fall back to the selected physical output instead.
-    auto restore_target_is_virtual = [&](AudioDeviceID id) {
-        return id == kAudioObjectUnknown
-            || id == app.capture_device
-            || device_name(id).find("BlackHole") != std::string::npos;
-    };
-    if (restore_target_is_virtual(app.original_default_output))
-        app.original_default_output = target_id;
-    if (restore_target_is_virtual(app.original_system_output))
-        app.original_system_output = target_id;
-
     {
         std::lock_guard<std::mutex> lock(app.outputs_mutex);
         app.selected_output_name = target;
     }
 
+    std::fprintf(stderr, "FxSound macOS startup: starting physical output %s...\n",
+                 device_name(target_id).c_str());
     if (!start_output(app, target_id)) {
         std::fprintf(stderr, "FxSound macOS: could not start output device %s.\n",
                      device_name(target_id).c_str());
         return 6;
     }
-    if (!start_capture(app, app.capture_device)) {
-        std::fprintf(stderr, "FxSound macOS: could not start BlackHole capture.\n");
-        stop_output(app);
-        return 7;
-    }
+    std::fprintf(stderr, "FxSound macOS startup: physical output ready.\n");
 
-    if (!set_default_output_device(app.capture_device)) {
-        std::fprintf(stderr, "FxSound macOS: could not set BlackHole as default output.\n");
-        stop_capture(app);
-        stop_output(app);
-        return 8;
-    }
-    if (!set_system_output_device(app.capture_device)) {
-        std::fprintf(stderr, "FxSound macOS: could not set BlackHole as system output.\n");
-        if (app.original_default_output != kAudioObjectUnknown)
-            set_default_output_device(app.original_default_output);
-        stop_capture(app);
-        stop_output(app);
-        return 9;
+    // Apple's process-tap API is promising, but on macOS 26.6 the HAL can
+    // block indefinitely inside AudioDeviceStart for a private tap aggregate.
+    // Keep it available for development, but default to the proven BlackHole
+    // backend until the native path is reliable across macOS versions.
+    const bool enable_native_tap = [] {
+        const char* value = std::getenv("FXSOUND_EXPERIMENTAL_NATIVE_TAP");
+        return value && std::string(value) == "1";
+    }();
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    char native_tap_error[256] = {};
+    const bool native_tap_started = enable_native_tap
+        && fxsoundNativeTapStart(capture_io,
+                                 &app,
+                                 &app.capture_device,
+                                 &app.capture_proc,
+                                 &app.native_tap_handle,
+                                 native_tap_error,
+                                 sizeof(native_tap_error));
+
+    if (native_tap_started) {
+        app.using_native_tap = true;
+        std::fprintf(stderr, "FxSound macOS startup: native CoreAudio system tap ready.\n");
+
+        // One-time migration from the old BlackHole backend: if a previous
+        // FxSound session left BlackHole as macOS's default output, restore
+        // the selected physical device. Native taps do not need to own the
+        // system default and we intentionally do not restore BlackHole later.
+        const auto is_legacy_blackhole = [](AudioDeviceID id) {
+            return id != kAudioObjectUnknown
+                && device_name(id).find("BlackHole") != std::string::npos;
+        };
+        if (is_legacy_blackhole(app.original_default_output)) {
+            set_default_output_device(target_id);
+            app.original_default_output = target_id;
+            std::fprintf(stderr,
+                "FxSound macOS migration: restored physical default output to %s.\n",
+                device_name(target_id).c_str());
+        }
+        if (is_legacy_blackhole(app.original_system_output)) {
+            set_system_output_device(target_id);
+            app.original_system_output = target_id;
+            std::fprintf(stderr,
+                "FxSound macOS migration: restored physical system output to %s.\n",
+                device_name(target_id).c_str());
+        }
+    } else {
+        if (enable_native_tap) {
+            std::fprintf(stderr,
+                "FxSound macOS: native system tap unavailable: %s; trying BlackHole fallback.\n",
+                native_tap_error[0] ? native_tap_error : "unknown error");
+        } else {
+            std::fprintf(stderr,
+                "FxSound macOS: using stable BlackHole backend; native system tap is experimental on this macOS release.\n");
+        }
+
+        app.capture_device = find_blackhole();
+        if (app.capture_device == kAudioObjectUnknown) {
+            std::fprintf(stderr,
+                "FxSound macOS: BlackHole fallback is not installed or not visible.\n");
+            stop_output(app);
+            return 4;
+        }
+
+        if (!start_capture(app, app.capture_device)) {
+            std::fprintf(stderr, "FxSound macOS: could not start BlackHole capture.\n");
+            stop_output(app);
+            return 7;
+        }
+
+        auto restore_target_is_virtual = [&](AudioDeviceID id) {
+            return id == kAudioObjectUnknown
+                || id == app.capture_device
+                || device_name(id).find("BlackHole") != std::string::npos;
+        };
+        if (restore_target_is_virtual(app.original_default_output))
+            app.original_default_output = target_id;
+        if (restore_target_is_virtual(app.original_system_output))
+            app.original_system_output = target_id;
+
+        if (!set_default_output_device(app.capture_device)) {
+            std::fprintf(stderr, "FxSound macOS: could not set BlackHole as default output.\n");
+            stop_capture(app);
+            stop_output(app);
+            return 8;
+        }
+        if (!set_system_output_device(app.capture_device)) {
+            std::fprintf(stderr, "FxSound macOS: could not set BlackHole as system output.\n");
+            if (app.original_default_output != kAudioObjectUnknown)
+                set_default_output_device(app.original_default_output);
+            stop_capture(app);
+            stop_output(app);
+            return 9;
+        }
+        app.changed_system_defaults = true;
+        std::fprintf(stderr, "FxSound macOS startup: BlackHole fallback ready.\n");
     }
 
     save_output_name(target);
     std::fprintf(stderr,
-        "FxSound macOS ready: BlackHole 2ch -> DfxDsp -> %s; 48kHz stereo; preset=%s\n",
+        "FxSound macOS ready: %s -> DfxDsp -> %s; 48kHz stereo; preset=%s\n",
+        app.using_native_tap ? "CoreAudio system tap" : "BlackHole 2ch",
         device_name(target_id).c_str(), app.current_preset.c_str());
 
     app.control_thread = std::thread(control_server, &app);
@@ -1379,12 +1464,21 @@ int main(int argc, char** argv) {
     if (app.control_thread.joinable())
         app.control_thread.join();
 
-    if (app.original_default_output != kAudioObjectUnknown)
-        set_default_output_device(app.original_default_output);
-    if (app.original_system_output != kAudioObjectUnknown)
-        set_system_output_device(app.original_system_output);
+    if (app.changed_system_defaults) {
+        if (app.original_default_output != kAudioObjectUnknown)
+            set_default_output_device(app.original_default_output);
+        if (app.original_system_output != kAudioObjectUnknown)
+            set_system_output_device(app.original_system_output);
+    }
 
-    stop_capture(app);
+    if (app.using_native_tap && app.native_tap_handle) {
+        fxsoundNativeTapStop(app.native_tap_handle);
+        app.native_tap_handle = nullptr;
+        app.capture_proc = nullptr;
+        app.capture_device = kAudioObjectUnknown;
+    } else {
+        stop_capture(app);
+    }
     stop_output(app);
 
     {

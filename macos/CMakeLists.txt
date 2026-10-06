@@ -65,6 +65,7 @@ target_link_libraries(preset_audio_test PRIVATE fxsound_dsp)
 
 add_executable(fxsound_coreaudio
   "${CMAKE_CURRENT_LIST_DIR}/audio/fxsound_coreaudio.cpp"
+  "${CMAKE_CURRENT_LIST_DIR}/audio/FxNativeTapBridge.mm"
 )
 target_include_directories(fxsound_coreaudio PRIVATE
   "${CMAKE_CURRENT_LIST_DIR}/../dsp/include"
@@ -73,6 +74,7 @@ target_link_libraries(fxsound_coreaudio PRIVATE
   fxsound_dsp
   "-framework CoreAudio"
   "-framework CoreFoundation"
+  "-framework Foundation"
 )
 
 

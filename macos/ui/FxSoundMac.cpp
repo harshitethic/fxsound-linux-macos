@@ -16,6 +16,8 @@
 
 #include <cstdlib>
 #include <cmath>
+#include <array>
+#include <vector>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -435,6 +437,44 @@ public:
         auto& controller = FxController::getInstance();
         controller.refresh();
 
+        const juce::String original_preset = controller.getCurrentPreset();
+        const bool original_preset_modified = controller.isPresetModified();
+        std::array<float, FxEffects::NumEffects> original_effects{};
+        for (int i = 0; i < FxEffects::NumEffects; ++i)
+            original_effects[static_cast<size_t>(i)] =
+                controller.getEffectValue(static_cast<FxEffects::EffectType>(i));
+
+        const int original_bands = controller.getNumEqBands();
+        std::vector<float> original_eq_frequency;
+        std::vector<float> original_eq_gain;
+        original_eq_frequency.reserve(static_cast<size_t>(original_bands));
+        original_eq_gain.reserve(static_cast<size_t>(original_bands));
+        for (int i = 0; i < original_bands; ++i)
+        {
+            original_eq_frequency.push_back(controller.getEqBandFrequency(i));
+            original_eq_gain.push_back(controller.getEqBandBoostCut(i));
+        }
+
+        const float original_volume = controller.getVolumeLeveling();
+        const float original_master = controller.getMasterGain();
+        const float original_balance = controller.getBalance();
+        const float original_filter_q = controller.getFilterQ();
+
+        auto eq_matches_original = [&]()
+        {
+            if (controller.getNumEqBands() != original_bands)
+                return false;
+            for (int i = 0; i < original_bands; ++i)
+            {
+                if (std::fabs(controller.getEqBandFrequency(i)
+                              - original_eq_frequency[static_cast<size_t>(i)]) >= 0.25f
+                    || std::fabs(controller.getEqBandBoostCut(i)
+                                 - original_eq_gain[static_cast<size_t>(i)]) >= 0.01f)
+                    return false;
+            }
+            return true;
+        };
+
         const bool original_compact = content_.isCompact();
         const int original_width = getWidth();
         if (resize_button_.onClick) resize_button_.onClick();
@@ -452,8 +492,10 @@ public:
         controller.refresh();
         check(controller.isPowerOn() == original_power, "power_restore");
 
-        check(content_.qaSelectPreset("Music"), "preset_combo_music");
-        check(content_.qaSelectPreset("General"), "preset_combo_general");
+        const juce::String probe_preset =
+            original_preset == "Music" ? "Voice" : "Music";
+        check(content_.qaSelectPreset(probe_preset), "preset_combo_change");
+        check(content_.qaSelectPreset(original_preset), "preset_combo_restore_original");
         check(content_.qaReselectCurrentOutput(), "output_combo_reselect");
 
         // Drive all five visible effect sliders through their actual JUCE
@@ -475,7 +517,6 @@ public:
                 && effect_sliders_ok;
         }
         check(effect_sliders_ok, "effect_sliders_all_5");
-        check(content_.qaSelectPreset("General"), "effect_sliders_restore_general");
 
         // Exercise an actual EQ gain slider and frequency control.
         bool eq_slider_ok = content_.qaSetEqGain(0, 3.0);
@@ -491,15 +532,8 @@ public:
         eq_slider_ok = std::fabs(controller.getEqBandFrequency(0) - test_freq) < 0.2f
             && eq_slider_ok;
         check(eq_slider_ok, "eq_gain_and_frequency_controls");
-        check(content_.qaSelectPreset("General"), "eq_controls_restore_general");
 
         check(content_.qaToggleAudioView(), "flip_to_audio_controls");
-
-        const int original_bands = controller.getNumEqBands();
-        const float original_volume = controller.getVolumeLeveling();
-        const float original_master = controller.getMasterGain();
-        const float original_balance = controller.getBalance();
-        const float original_filter_q = controller.getFilterQ();
 
         // Drive the actual audio-control widgets and combo box.
         bool audio_sliders_ok = content_.qaSelectBands(15);
@@ -525,11 +559,73 @@ public:
               && controller.getFilterQ() == FxController::DEFAULT_FILTER_Q,
               "restore_defaults_values");
 
+        // Restore the exact preset state that existed before QA. If it was
+        // an unmodified factory preset, RESET removes the temporary autosave
+        // created by the slider tests so QA leaves no trace.
+        bool preset_state_restored = controller.setPresetName(original_preset);
+        if (preset_state_restored && !original_preset_modified)
+        {
+            preset_state_restored = controller.resetCurrentPreset();
+            check(preset_state_restored && eq_matches_original(),
+                  "qa_factory_reset_restores_exact_eq");
+        }
+        else if (preset_state_restored)
+        {
+            controller.setNumEqBands(original_bands);
+            for (int i = 0; i < FxEffects::NumEffects; ++i)
+                controller.setEffectValue(
+                    static_cast<FxEffects::EffectType>(i),
+                    original_effects[static_cast<size_t>(i)] * 10.0f);
+
+            for (int i = 0; i < original_bands; ++i)
+            {
+                controller.setEqBandFrequency(
+                    i, original_eq_frequency[static_cast<size_t>(i)]);
+                controller.setEqBandBoostCut(
+                    i, original_eq_gain[static_cast<size_t>(i)]);
+            }
+        }
+
+        // Audio controls and band count are persisted separately from the
+        // factory preset payload, so restore those after preset restoration.
         controller.setNumEqBands(original_bands);
+        controller.refresh();
+        check(eq_matches_original(), "qa_band_restore_preserves_exact_eq");
+
         controller.setVolumeLeveling(original_volume);
         controller.setMasterGain(original_master);
         controller.setBalance(original_balance);
         controller.setFilterQ(original_filter_q);
+        controller.refresh();
+
+        preset_state_restored = preset_state_restored
+            && controller.getCurrentPreset() == original_preset
+            && controller.isPresetModified() == original_preset_modified
+            && controller.getNumEqBands() == original_bands
+            && std::fabs(controller.getVolumeLeveling() - original_volume) < 0.01f
+            && std::fabs(controller.getMasterGain() - original_master) < 0.01f
+            && std::fabs(controller.getBalance() - original_balance) < 0.01f
+            && std::fabs(controller.getFilterQ() - original_filter_q) < 0.01f;
+
+        for (int i = 0; i < FxEffects::NumEffects; ++i)
+            preset_state_restored = preset_state_restored
+                && std::fabs(controller.getEffectValue(
+                       static_cast<FxEffects::EffectType>(i))
+                       - original_effects[static_cast<size_t>(i)]) < 0.001f;
+
+        if (controller.getNumEqBands() == original_bands)
+        {
+            for (int i = 0; i < original_bands; ++i)
+            {
+                preset_state_restored = preset_state_restored
+                    && std::fabs(controller.getEqBandFrequency(i)
+                                 - original_eq_frequency[static_cast<size_t>(i)]) < 0.25f
+                    && std::fabs(controller.getEqBandBoostCut(i)
+                                 - original_eq_gain[static_cast<size_t>(i)]) < 0.01f;
+            }
+        }
+
+        check(preset_state_restored, "qa_restore_original_audio_state");
         check(content_.qaRestoreAudioView(), "flip_restore_effects");
 
         const auto original_theme = FxTheme::getThemeMode();
