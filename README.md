@@ -52,7 +52,7 @@ The same command works on supported Linux systems and macOS:
 
 ```bash
 git clone https://github.com/harshitethic/fxsound-linux-macos.git
-cd fxsound-app
+cd fxsound-linux-macos
 ./install.sh
 ```
 
