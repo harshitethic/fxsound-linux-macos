@@ -73,7 +73,7 @@ typedef		unsigned long			BE_ERR;
 
 #ifdef _BLADEDLL
 #undef FLOAT
-	#include <Windows.h>
+	#include <windows.h>
 #endif
 
 #define CURRENT_STRUCT_VERSION 1

@@ -23,7 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define _AUDIOPASSTHRU_H_ 
 
 #ifndef __ANDROID__
-#include <Windows.h>
+#include <windows.h>
 #endif //WIN32
 #include <Mmdeviceapi.h>
 #include <vector> 

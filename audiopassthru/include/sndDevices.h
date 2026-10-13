@@ -18,7 +18,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #ifndef _SND_DEVICES_H_
 #define _SND_DEVICES_H_
 
-#include <Winbase.h>
+#include <winbase.h>
 #include <comdef.h>
 #include <mmreg.h>
 #include <Mmdeviceapi.h>
