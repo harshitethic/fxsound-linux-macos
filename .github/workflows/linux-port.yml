@@ -3,7 +3,13 @@ name: Linux port
 on:
   push:
     branches:
+      - main
       - fxsound-linux
+    paths:
+      - 'linux/**'
+      - 'dsp/**'
+      - 'audiopassthru/**'
+      - '.github/workflows/linux-port.yml'
   pull_request:
     paths:
       - 'linux/**'

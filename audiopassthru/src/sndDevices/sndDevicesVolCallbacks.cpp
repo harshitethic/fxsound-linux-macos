@@ -28,7 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <Mmdeviceapi.h>
 #include <Audioclient.h>
 #include <Functiondiscoverykeys_devpkey.h>
-#include <mmdeviceapi.h>
+#include <Mmdeviceapi.h>
 #include <endpointvolume.h>
 
 #include "slout.h"
