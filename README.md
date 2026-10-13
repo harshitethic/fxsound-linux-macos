@@ -1,5 +1,9 @@
 # FxSound for Linux & macOS
 
+[![Linux core CI](https://github.com/harshitethic/fxsound-linux-macos/actions/workflows/linux-port.yml/badge.svg?branch=main)](https://github.com/harshitethic/fxsound-linux-macos/actions/workflows/linux-port.yml)
+[![macOS CI](https://github.com/harshitethic/fxsound-linux-macos/actions/workflows/macos-port.yml/badge.svg?branch=main)](https://github.com/harshitethic/fxsound-linux-macos/actions/workflows/macos-port.yml)
+
+
 **Unofficial community ports of the open-source FxSound audio enhancer.**
 
 This fork keeps the real upstream **FxSound DfxDsp** processing engine and
