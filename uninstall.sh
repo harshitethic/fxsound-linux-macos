@@ -6,6 +6,10 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
   exec "$ROOT/macos/uninstall.sh" "$@"
 fi
 
+if [[ $# -gt 1 || ( $# -eq 1 && "${1:-}" != "--purge" ) ]]; then
+  echo "Usage: ./uninstall.sh [--purge]" >&2
+  exit 2
+fi
 PURGE=0
 [[ "${1:-}" == "--purge" ]] && PURGE=1
 
@@ -37,10 +41,11 @@ rm -f \
   "$HOME/.local/share/applications/fxsound-linux.desktop" \
   "$HOME/.local/share/icons/hicolor/256x256/apps/fxsound-linux.png"
 rm -rf "$HOME/.local/libexec/fxsound-linux"
-rm -rf "$HOME/.local/share/fxsound-linux"
 
+# Presets live in ~/.local/share, not ~/.config. A normal uninstall must
+# preserve user-edited/created presets; only an explicit purge removes data.
 if [[ "$PURGE" -eq 1 ]]; then
-  rm -rf "$HOME/.config/fxsound-linux"
+  rm -rf "$HOME/.config/fxsound-linux" "$HOME/.local/share/fxsound-linux"
 fi
 
 systemctl --user daemon-reload >/dev/null 2>&1 || true
@@ -51,5 +56,5 @@ fi
 
 echo "FxSound Linux removed."
 if [[ "$PURGE" -eq 0 ]]; then
-  echo "Settings kept in ~/.config/fxsound-linux (use ./uninstall.sh --purge to remove them too)."
+  echo "Settings and presets kept in ~/.config/fxsound-linux and ~/.local/share/fxsound-linux (use --purge to remove both)."
 fi
