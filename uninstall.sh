@@ -12,6 +12,23 @@ PURGE=0
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
 
+# Capture the current default BEFORE stopping FxSound: after the daemon
+# stops, WirePlumber may remove its virtual sink from the status output.
+# Do not replace an unrelated existing default with an arbitrary first sink.
+restore_sink=""
+if command -v wpctl >/dev/null 2>&1; then
+  status_before_stop="$(wpctl status 2>/dev/null || true)"
+  restore_sink="$(printf '%s\n' "$status_before_stop" | awk '
+    /Sinks:/{inside=1;next}
+    /Sources:/{inside=0}
+    inside && /\*/ && /FxSound/{fx_default=1}
+    inside && !/FxSound/ && match($0, /[0-9]+\./) {
+      if (fallback=="") fallback=substr($0, RSTART, RLENGTH-1)
+    }
+    END {if (fx_default && fallback!="") print fallback}
+  ')"
+fi
+
 systemctl --user disable --now fxsound-linux.service >/dev/null 2>&1 || true
 
 rm -f \
@@ -28,20 +45,8 @@ fi
 
 systemctl --user daemon-reload >/dev/null 2>&1 || true
 
-if command -v wpctl >/dev/null 2>&1; then
-  sink_id="$(
-    wpctl status 2>/dev/null |
-      awk '
-        /Sinks:/{inside=1; next}
-        /Sources:/{inside=0}
-        inside && $0 !~ /FxSound/ {
-          if (match($0, /[0-9]+\./)) {
-            print substr($0, RSTART, RLENGTH-1)
-            exit
-          }
-        }'
-  )"
-  [[ -n "$sink_id" ]] && wpctl set-default "$sink_id" >/dev/null 2>&1 || true
+if [[ -n "$restore_sink" ]] && command -v wpctl >/dev/null 2>&1; then
+  wpctl set-default "$restore_sink" >/dev/null 2>&1 || true
 fi
 
 echo "FxSound Linux removed."
