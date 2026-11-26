@@ -57,12 +57,24 @@ troubleshooting with `FXSOUND_PEAK_GUARD=1`.
 
 ## Build
 
-Required core packages on Debian/Kali-like distributions:
+Required core packages:
+
+Debian/Kali-like distributions:
 
 ```bash
 sudo apt install build-essential cmake pkg-config \
   libpipewire-0.3-dev libspa-0.2-dev
 ```
+
+Arch Linux:
+
+```bash
+sudo pacman -S --needed base-devel cmake pkgconf git pipewire pipewire-audio pipewire-pulse wireplumber
+```
+
+On both, the JUCE desktop UI additionally needs GTK 3, X11/Xext/Xrandr/
+Xinerama/Xcursor, FreeType, Fontconfig and ALSA development files. The root
+`./install.sh` installs the full set automatically.
 
 The desktop UI currently expects JUCE 6.1.6:
 

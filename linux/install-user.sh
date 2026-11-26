@@ -95,6 +95,54 @@ sed -i "s|Exec=%h/|Exec=$HOME/|" "$APP_DIR/fxsound-linux.desktop"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
 
+# The daemon exits without a saved output; keep an existing choice on reinstall.
+state_dir="$HOME/.config/fxsound-linux"
+if [[ ! -f "$state_dir/output-node" ]] && command -v wpctl >/dev/null 2>&1; then
+  status="$(wpctl status 2>/dev/null || true)"
+  sink_id="$(
+    printf '%s\n' "$status" | awk '
+      /Sinks:/{inside=1;next}
+      /Sources:/{inside=0}
+      inside && /\*/ && match($0, /[0-9]+\.[[:space:]]*/) {
+        id = substr($0, RSTART, RLENGTH)
+        gsub(/[^0-9]/, "", id)
+        print id
+        exit
+      }'
+  )"
+  node_name=""
+  if [[ -n "$sink_id" ]]; then
+    node_name="$(
+      wpctl inspect "$sink_id" 2>/dev/null | awk -F' = ' '
+        /node\.name/ { gsub(/"/, "", $2); print $2; exit }'
+    )"
+  fi
+  if [[ "$node_name" == "fxsound_sink" ]]; then
+    sink_id="$(
+      printf '%s\n' "$status" | awk '
+        /Sinks:/{inside=1;next}
+        /Sources:/{inside=0}
+        inside && $0 !~ /FxSound/ && match($0, /[0-9]+\.[[:space:]]*/) {
+          id = substr($0, RSTART, RLENGTH)
+          gsub(/[^0-9]/, "", id)
+          print id
+          exit
+        }'
+    )"
+    node_name=""
+    if [[ -n "$sink_id" ]]; then
+      node_name="$(
+        wpctl inspect "$sink_id" 2>/dev/null | awk -F' = ' '
+          /node\.name/ { gsub(/"/, "", $2); print $2; exit }'
+      )"
+    fi
+  fi
+  if [[ -n "$node_name" && "$node_name" != "fxsound_sink" ]]; then
+    mkdir -p "$state_dir"
+    printf '%s\n' "$node_name" > "$state_dir/output-node"
+  fi
+fi
+
 systemctl --user daemon-reload
 systemctl --user enable --now fxsound-linux.service
 

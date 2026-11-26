@@ -12,20 +12,27 @@ BUILD_DIR="$ROOT/linux/build-release"
 
 echo "==> FxSound Linux installer"
 
-if ! command -v apt-get >/dev/null 2>&1; then
-  echo "This installer currently supports Debian/Ubuntu/Kali-family distributions." >&2
-  echo "See linux/README.md for manual build instructions on other distributions." >&2
+echo "==> Installing build dependencies"
+command -v sudo >/dev/null 2>&1 || { echo "sudo is required to install packages; install it as root first." >&2; exit 1; }
+if command -v pacman >/dev/null 2>&1; then
+  # Arch ships dev headers in the runtime packages; --needed avoids a full system upgrade.
+  sudo pacman -S --needed --noconfirm \
+    base-devel cmake ninja pkgconf git pipewire pipewire-audio pipewire-pulse wireplumber \
+    gtk3 libx11 libxext libxrandr libxinerama libxcursor \
+    freetype2 fontconfig alsa-lib
+elif command -v apt-get >/dev/null 2>&1; then
+  sudo apt-get update
+  sudo apt-get install -y \
+    build-essential cmake ninja-build pkg-config git \
+    libpipewire-0.3-dev libspa-0.2-dev \
+    libgtk-3-dev libx11-dev libxext-dev libxrandr-dev \
+    libxinerama-dev libxcursor-dev \
+    libfreetype6-dev libfontconfig1-dev libasound2-dev
+else
+  echo "No supported package manager found (apt-get or pacman)." >&2
+  echo "See linux/README.md for manual build instructions." >&2
   exit 1
 fi
-
-echo "==> Installing build dependencies"
-sudo apt-get update
-sudo apt-get install -y \
-  build-essential cmake ninja-build pkg-config git \
-  libpipewire-0.3-dev libspa-0.2-dev \
-  libgtk-3-dev libx11-dev libxext-dev libxrandr-dev \
-  libxinerama-dev libxcursor-dev \
-  libfreetype6-dev libfontconfig1-dev libasound2-dev
 
 if [[ ! -f "$JUCE_DIR/CMakeLists.txt" ]]; then
   echo "==> Fetching JUCE 6.1.6"

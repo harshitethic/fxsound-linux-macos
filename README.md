@@ -85,10 +85,11 @@ automatically and keeps the last selected FxSound settings.
 
 Full macOS notes: [macos/README.md](macos/README.md)
 
-### Debian / Ubuntu / Kali
+### Debian / Ubuntu / Kali / Arch
 
-The Linux installer installs the required PipeWire/JUCE build dependencies,
-builds the native daemon/UI, runs DSP tests and enables the user service.
+The Linux installer installs the required PipeWire/JUCE build dependencies with
+apt or pacman, builds the native daemon/UI, runs DSP tests and enables the user
+service.
 
 Open it after installation with:
 
@@ -187,7 +188,8 @@ compatibility patch used by the installer.
 - Stereo is currently the best-tested path.
 - Bluetooth, HDMI, 5.1/7.1 and unusual sample rates need broader testing.
 - The macOS native process-tap backend is experimental.
-- Linux automatic installation currently targets Debian-family distributions.
+- Linux automatic installation targets Debian-family distributions and Arch;
+  other distributions need the manual build steps in `linux/README.md`.
 - macOS automatic installation assumes Homebrew when dependencies are missing.
 
 ## Contributing

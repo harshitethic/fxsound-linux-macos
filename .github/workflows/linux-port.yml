@@ -9,12 +9,16 @@ on:
       - 'linux/**'
       - 'dsp/**'
       - 'audiopassthru/**'
+      - 'install.sh'
+      - 'tests/**'
       - '.github/workflows/linux-port.yml'
   pull_request:
     paths:
       - 'linux/**'
       - 'dsp/**'
       - 'audiopassthru/**'
+      - 'install.sh'
+      - 'tests/**'
       - '.github/workflows/linux-port.yml'
   workflow_dispatch:
 
@@ -48,3 +52,8 @@ jobs:
 
       - name: RTKit helper syntax
         run: sh -n linux/fxsound-rt-priority.sh
+
+      - name: Installer checks
+        run: |
+          bash tests/test_install_deps.sh
+          bash tests/test_install_output_node.sh
